@@ -273,3 +273,8 @@ section {
       color: #ffa600;
       margin-bottom: 1rem;
     }
+    /* === Panel de socio (ajustes mínimos) === */
+.muted { color:#A0AEC0; }
+.hours-list { list-style:none; padding-left:0; }
+.hours-list li { padding:.45rem 0; border-bottom:1px solid #1e2530; }
+.tag { display:inline-block; background:#12766a; color:#E0E0E0; padding:.15rem .5rem; border-radius:4px; font-size:.8rem; }
