@@ -1,14 +1,18 @@
-/* ========= ZYBER – Landing JS =========
+/* ========= ZYBER – Landing JS (actualizado) =========
    Funciones: Postulación (formulario.html) + Login (login.html)
    Endpoints:
      - api-usuarios:  http://localhost:8001/api
      - api-cooperativa: http://localhost:8002/api  (no usado aquí)
-     - backoffice api: http://localhost:8003/api   (no usado aquí)
+   Redirecciones:
+     - Backoffice monolítico (Laravel): http://127.0.0.1:8003/login
+     - Front usuarios (estático): http://127.0.0.1:5500/frontend_usuarios/index.html
 */
 
-const API_USUARIOS_BASE = "http://localhost:8001";   // api-usuarios (Laravel)
-const API_COOP_BASE     = "http://localhost:8002";   // api-cooperativa (Laravel)
-const API_BACKOFFICE    = "http://localhost:8003";   // api-backoffice (Laravel) // (no usado acá)
+const API_USUARIOS_BASE   = "http://localhost:8001";   // api-usuarios (Laravel)
+const API_COOP_BASE       = "http://localhost:8002";   // api-cooperativa (Laravel) (no usado aquí)
+const BACKOFFICE_MONO_URL = "http://127.0.0.1:8003";   // Backoffice monolítico (Laravel)
+const FRONT_USUARIOS_URL  = "http://127.0.0.1:5500/frontend_usuarios/index.html";
+const LANDING_LOGIN_URL   = "../landing_page/login.html"; // para el botón "Salir"
 
 // ====== Utilidades ======
 function setMsgBelowForm(form, text, color) {
@@ -20,6 +24,7 @@ function setMsgBelowForm(form, text, color) {
     msg.style.marginTop = "0.5rem";
     form.appendChild(msg);
   }
+  msg.style.whiteSpace = "pre-wrap";
   msg.style.color = color || "#cbd5e1";
   msg.textContent = text || "";
 }
@@ -57,7 +62,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ====== Hook para formulario de postulación (formulario.html) ======
   (function hookPostulacion() {
-    // Detectamos por clase y dejamos fallback por action original
     const form = document.querySelector('form.form-cliente') ||
                  document.querySelector('form[action="registro_cliente.php"]');
     const ci = document.getElementById("CI");
@@ -87,7 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
         primer_apellido:  pa,
         segundo_apellido: null,
         email:            email.trim(),
-        telefono:         tel.trim() || null,
+        telefono:         (tel || "").trim() || null,
         // contraseña temporal: CI (se puede cambiar luego)
         password:         ciVal.trim() || "123456",
       };
@@ -99,7 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (err) {
         if (err?.errors) {
           const listado = Object.entries(err.errors)
-            .map(([k, v]) => `• ${k}: ${v.join(", ")}`)
+            .map(([k, v]) => `• ${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
             .join("\n");
           setMsgBelowForm(form, `Errores:\n${listado}`, msgColorErr);
         } else {
@@ -121,28 +125,37 @@ document.addEventListener("DOMContentLoaded", () => {
       const msgColorErr = "#b00";
       setMsgBelowForm(form, "Procesando...");
 
-      const usuario = (userInput.value || "").trim();  // CI o Email
+      const usuario  = (userInput.value || "").trim();  // CI o Email
       const password = passInput.value || "";
 
       try {
-        // Nuestra API espera { login, password }
-        const data = await postJSON(`${API_USUARIOS_BASE}/api/login`, { login: usuario, password });
+        // Nuestra API puede aceptar { login, password } o { ci_usuario, password }.
+        const body = { login: usuario, password };
+        const data = await postJSON(`${API_USUARIOS_BASE}/api/login`, body);
 
-        // Guardar token y rol (viene en data.user.rol)
-        localStorage.setItem("token", data.token);
-        const rol = (data.user && data.user.rol) ? data.user.rol : "socio";
+        // token (lo usamos sólo para front_usuarios); el backoffice monolítico NO lo usa.
+        if (data.token) localStorage.setItem("token", data.token);
+
+        // rol puede venir en data.user.rol o en data.rol
+        const rol = (data?.user?.rol) || data?.rol || "socio";
         localStorage.setItem("rol", rol);
 
         setMsgBelowForm(form, "Login OK. Redirigiendo...", "green");
 
-        // Redirecciones ajustadas a tu estructura
         if (rol === "admin") {
-          window.location.href = "../backoffice/index.html";
+          // Monolítico (Laravel) usa sesión: no necesita el token de api-usuarios
+          localStorage.removeItem("token"); // limpieza para evitar confusión
+          window.location.href = `${BACKOFFICE_MONO_URL}/login`;
         } else {
-          window.location.href = "../frontend_usuarios/index.html";
+          // Front de usuarios (estático, sí podría usar token)
+          window.location.href = FRONT_USUARIOS_URL;
         }
       } catch (err) {
-        setMsgBelowForm(form, err?.error || err?.message || "Credenciales inválidas o usuario no aprobado.", msgColorErr);
+        setMsgBelowForm(
+          form,
+          err?.error || err?.message || "Credenciales inválidas o usuario no aprobado.",
+          msgColorErr
+        );
       }
     });
   })();
@@ -153,8 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       localStorage.removeItem("token");
       localStorage.removeItem("rol");
-      // ajustá si tu login está en otra ruta
-      window.location.href = "../landing_page/login.html";
+      window.location.href = LANDING_LOGIN_URL;
     }
   });
 
