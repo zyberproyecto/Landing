@@ -6,10 +6,9 @@
   <title>Iniciar sesión | Cooperativa</title>
   <link rel="stylesheet" href="css/estilos.css" />
   <link href="https://fonts.googleapis.com/css2?family=REM:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet" />
+  <script src="js/landing.js" defer></script>
 </head>
-<script src="js/landing.js"></script>
 <body>
-
   <!-- Header -->
   <header>
     <div class="container">
@@ -18,7 +17,6 @@
         <ul>
           <li><a href="index.html">INICIO</a></li>
           <li><a href="formulario.html">CONTACTO</a></li>
-       
         </ul>
       </nav>
     </div>
@@ -26,7 +24,8 @@
 
   <!-- Formulario de login -->
   <main class="container">
-    <form action="https://api.mi-cooperativa.uy/auth/login" method="POST" class="form-cliente">
+    <!-- Sin action: lo maneja landing.js -->
+    <form id="login-form" class="form-cliente" autocomplete="off">
       <h2 style="text-align: center;">Iniciar sesión</h2>
 
       <div class="form-group">
@@ -40,6 +39,7 @@
       </div>
 
       <button type="submit" class="btn">Entrar</button>
+      <p data-form-msg style="margin-top:.5rem;min-height:1.25rem;"></p>
     </form>
   </main>
 
@@ -49,6 +49,5 @@
       <p>&copy; 2025 ZYBER S.A.S. Todos los derechos reservados.</p>
     </div>
   </footer>
-<script src="js/landing.js"></script>
 </body>
 </html>

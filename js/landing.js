@@ -1,20 +1,21 @@
-/* ========= ZYBER – Landing JS (actualizado) =========
-   Funciones: Postulación (formulario.html) + Login (login.html)
-   Endpoints:
-     - api-usuarios:  http://localhost:8001/api
-     - api-cooperativa: http://localhost:8002/api  (no usado aquí)
-   Redirecciones:
-     - Backoffice monolítico (Laravel): http://127.0.0.1:8003/login
-     - Front usuarios (estático): http://127.0.0.1:5500/frontend_usuarios/index.html
-*/
+/* ========================================================================
+   Landing – lógica de Login + Registro
+   Requisitos:
+   - API Usuarios     => http://127.0.0.1:8001  (POST /api/login, GET /api/perfil)
+   - API Cooperativa  => http://127.0.0.1:8002  (POST /api/solicitudes)
+   - Backoffice       => http://127.0.0.1:8003  (/sso?token=...)
+   - Front Socios     => página estática o app separada
+   ======================================================================== */
 
-const API_USUARIOS_BASE   = "http://localhost:8001";   // api-usuarios (Laravel)
-const API_COOP_BASE       = "http://localhost:8002";   // api-cooperativa (Laravel) (no usado aquí)
-const BACKOFFICE_MONO_URL = "http://127.0.0.1:8003";   // Backoffice monolítico (Laravel)
-const FRONT_USUARIOS_URL  = "http://127.0.0.1:5500/frontend_usuarios/index.html";
-const LANDING_LOGIN_URL   = "../landing_page/login.html"; // para el botón "Salir"
+/* ========= Endpoints ========= */
+const API_USUARIOS_BASE   = "http://127.0.0.1:8001";
+const API_COOP_BASE       = "http://127.0.0.1:8002";
+const BACKOFFICE_URL      = "http://127.0.0.1:8003";
+const FRONT_SOCIOS_URL    = "http://127.0.0.1:5500/frontend_usuarios/index.html";
 
-// ====== Utilidades ======
+/* ========= Helpers ========= */
+function $(sel, root) { return (root || document).querySelector(sel); }
+
 function setMsgBelowForm(form, text, color) {
   let msg = form.querySelector("[data-form-msg]");
   if (!msg) {
@@ -25,149 +26,163 @@ function setMsgBelowForm(form, text, color) {
     form.appendChild(msg);
   }
   msg.style.whiteSpace = "pre-wrap";
-  msg.style.color = color || "#cbd5e1";
+  msg.style.color = color || "#334155";
   msg.textContent = text || "";
 }
 
-async function postJSON(url, body, token) {
+async function postJSON(url, body, extraHeaders) {
   const res = await fetch(url, {
     method: "POST",
     headers: {
-      "Accept": "application/json",
+      Accept: "application/json",
       "Content-Type": "application/json",
-      ...(token ? { "Authorization": "Bearer " + token } : {})
+      ...(extraHeaders || {}),
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw data;
   return data;
 }
 
-// Nombre completo → primer_nombre / segundo_nombre / primer_apellido
-function splitNombreCompleto(nc) {
-  const partes = (nc || "").trim().split(/\s+/).filter(Boolean);
-  if (partes.length === 0) return { pn: "", sn: null, pa: "" };
-  if (partes.length === 1) return { pn: partes[0], sn: null, pa: "" };
-  const pn = partes[0];
-  const pa = partes[partes.length - 1];
-  const sn = partes.slice(1, -1).join(" ") || null;
-  return { pn, sn, pa };
+async function getJSON(url, token) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: "application/json",
+      ...(token ? { Authorization: "Bearer " + token } : {}),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw data;
+  return data;
 }
 
-// ==========================================================
-// Hooks: se registran cuando el DOM está listo
-// ==========================================================
+function extractToken(possible) {
+  return (
+    possible?.token ||
+    possible?.access_token ||
+    possible?.data?.token ||
+    possible?.data?.access_token ||
+    null
+  );
+}
+
+/* ========= App ========= */
 document.addEventListener("DOMContentLoaded", () => {
 
-  // ====== Hook para formulario de postulación (formulario.html) ======
-  (function hookPostulacion() {
-    const form = document.querySelector('form.form-cliente') ||
-                 document.querySelector('form[action="registro_cliente.php"]');
-    const ci = document.getElementById("CI");
-    if (!form || !ci) return; // no estamos en formulario.html
+  /* ================== LOGIN (landing/login.html) ================== */
+  const loginForm = $("#login-form") || (function searchLoginFallback(){
+    const f = document.querySelector("form");
+    if (!f) return null;
+    const u = $("#usuario", f), p = $("#password", f);
+    return (u && p) ? f : null;
+  })();
 
-    // Evita navegar al .php si algo falla
-    form.setAttribute("action", "#");
+  if (loginForm) {
+    loginForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const usuario = ($("#usuario", loginForm)?.value || "").trim();
+      const password = ($("#password", loginForm)?.value || "");
 
-    form.addEventListener("submit", async (e) => {
+      if (!usuario || !password) {
+        setMsgBelowForm(loginForm, "Completá usuario y contraseña.", "#b00");
+        return;
+      }
+
+      try {
+        setMsgBelowForm(loginForm, "Procesando login...");
+
+        // 1) Login en API Usuarios
+        const loginResp = await postJSON(`${API_USUARIOS_BASE}/api/login`, {
+          login: usuario,
+          password
+        });
+        const token = extractToken(loginResp);
+        if (!token) throw new Error("No llegó token desde API Usuarios.");
+
+        localStorage.setItem("token", token);
+
+        // 2) Perfil del usuario
+        const perfilResp = await getJSON(`${API_USUARIOS_BASE}/api/perfil`, token);
+        const perfil  = perfilResp?.data || perfilResp || {};
+        const rol     = perfil?.rol ?? loginResp?.user?.rol ?? "socio";
+        const estado  = perfil?.estado_registro ?? perfil?.estado ?? "Pendiente";
+
+        if (rol === "admin" && estado === "Aprobado") {
+          setMsgBelowForm(loginForm, "Login OK (admin). Redirigiendo al Backoffice...", "green");
+          window.location.assign(`${BACKOFFICE_URL}/sso?token=${encodeURIComponent(token)}`);
+        } else if (rol === "socio" && estado === "Aprobado") {
+          setMsgBelowForm(loginForm, "Login OK (socio). Redirigiendo al portal...", "green");
+          window.location.assign(FRONT_SOCIOS_URL);
+        } else {
+          setMsgBelowForm(loginForm, "Usuario no aprobado o sin permisos para ingresar.", "#b00");
+        }
+      } catch (err) {
+        console.error("Login error:", err);
+        const msg =
+          err?.errors?.login?.[0] ||
+          err?.message ||
+          err?.error ||
+          "Credenciales inválidas o usuario no aprobado.";
+        setMsgBelowForm(loginForm, msg, "#b00");
+      }
+    });
+  }
+
+  /* ================== REGISTRO (landing/formulario.html) ================== */
+  const regForm = $("#registro-form");
+  if (regForm) {
+    regForm.addEventListener("submit", async (e) => {
       e.preventDefault();
 
-      const msgColorErr = "#b00";
-      setMsgBelowForm(form, "Enviando solicitud...");
+      const CI        = $("#CI")?.value.trim() || "";
+      const nombre    = $("#nombre")?.value.trim() || "";
+      const email     = $("#email")?.value.trim() || "";
+      const telefono  = $("#telefono")?.value.trim() || "";
+      const menores   = $("#menores_cargo")?.value || "no";   // "si" | "no"
+      const interes   = $("#intereses")?.value || "1";        // "1" | "2" | "3"
+      const mensaje   = $("#mensaje")?.value.trim() || "";
 
-      const ciVal   = (form.querySelector('[name="CI"]') || {}).value || "";
-      const nomComp = (form.querySelector('[name="nombre"]') || {}).value || "";
-      const email   = (form.querySelector('[name="email"]') || {}).value || "";
-      const tel     = (form.querySelector('[name="telefono"]') || {}).value || "";
+      if (!CI || !nombre || !email || !telefono) {
+        setMsgBelowForm(regForm, "Completá todos los campos obligatorios.", "#b00");
+        return;
+      }
 
-      const { pn, sn, pa } = splitNombreCompleto(nomComp);
+      setMsgBelowForm(regForm, "Enviando solicitud...");
 
-      // 1ª entrega: la landing registra en api-usuarios
+      // Contrato limpio para la API: boolean + entero
       const payload = {
-        ci_usuario:       ciVal.trim(),
-        primer_nombre:    pn,
-        segundo_nombre:   sn,
-        primer_apellido:  pa,
-        segundo_apellido: null,
-        email:            email.trim(),
-        telefono:         (tel || "").trim() || null,
-        // contraseña temporal: CI (se puede cambiar luego)
-        password:         ciVal.trim() || "123456",
+        ci_usuario: CI,
+        nombre_completo: nombre,
+        email,
+        telefono,
+        menores_a_cargo: (menores === "si"),     // boolean
+        dormitorios: parseInt(interes, 10),      // entero 1..3
+        comentarios: mensaje || null,
       };
 
       try {
-        await postJSON(`${API_USUARIOS_BASE}/api/registro`, payload);
-        setMsgBelowForm(form, "¡Postulación enviada! Tu estado es PENDIENTE hasta aprobación.", "green");
-        form.reset();
+        await postJSON(`${API_COOP_BASE}/api/solicitudes`, payload);
+        setMsgBelowForm(regForm, "¡Solicitud enviada! Te contactaremos cuando sea aprobada.", "green");
+        regForm.reset();
       } catch (err) {
-        if (err?.errors) {
-          const listado = Object.entries(err.errors)
-            .map(([k, v]) => `• ${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
-            .join("\n");
-          setMsgBelowForm(form, `Errores:\n${listado}`, msgColorErr);
-        } else {
-          setMsgBelowForm(form, err?.error || err?.message || "No se pudo enviar la postulación.", msgColorErr);
-        }
+        console.error("Registro error:", err);
+        const firstError =
+          (err?.errors && typeof err.errors === "object" && Object.values(err.errors)[0]?.[0]) ||
+          err?.message ||
+          err?.error ||
+          "No se pudo enviar la solicitud.";
+        setMsgBelowForm(regForm, firstError, "#b00");
       }
     });
-  })();
+  }
 
-  // ====== Hook para login (login.html) ======
-  (function hookLogin() {
-    const form = document.querySelector('form.form-cliente, main.container form, form[action*="login"]');
-    const userInput = document.getElementById("usuario");
-    const passInput = document.getElementById("password");
-    if (!form || !userInput || !passInput) return; // no estamos en login.html
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const msgColorErr = "#b00";
-      setMsgBelowForm(form, "Procesando...");
-
-      const usuario  = (userInput.value || "").trim();  // CI o Email
-      const password = passInput.value || "";
-
-      try {
-        // Nuestra API puede aceptar { login, password } o { ci_usuario, password }.
-        const body = { login: usuario, password };
-        const data = await postJSON(`${API_USUARIOS_BASE}/api/login`, body);
-
-        // token (lo usamos sólo para front_usuarios); el backoffice monolítico NO lo usa.
-        if (data.token) localStorage.setItem("token", data.token);
-
-        // rol puede venir en data.user.rol o en data.rol
-        const rol = (data?.user?.rol) || data?.rol || "socio";
-        localStorage.setItem("rol", rol);
-
-        setMsgBelowForm(form, "Login OK. Redirigiendo...", "green");
-
-        if (rol === "admin") {
-          // Monolítico (Laravel) usa sesión: no necesita el token de api-usuarios
-          localStorage.removeItem("token"); // limpieza para evitar confusión
-          window.location.href = `${BACKOFFICE_MONO_URL}/login`;
-        } else {
-          // Front de usuarios (estático, sí podría usar token)
-          window.location.href = FRONT_USUARIOS_URL;
-        }
-      } catch (err) {
-        setMsgBelowForm(
-          form,
-          err?.error || err?.message || "Credenciales inválidas o usuario no aprobado.",
-          msgColorErr
-        );
-      }
-    });
-  })();
-
-  // ====== Botón "Salir" (si lo usas en otras páginas) ======
+  /* ================== Logout opcional (si lo usás) ================== */
   document.addEventListener("click", (e) => {
-    if (e.target && e.target.matches('[data-logout="1"], #logout')) {
+    if (e.target && (e.target.matches('[data-logout="1"]') || e.target.id === "logout")) {
       e.preventDefault();
       localStorage.removeItem("token");
-      localStorage.removeItem("rol");
-      window.location.href = LANDING_LOGIN_URL;
+      window.location.reload();
     }
   });
-
 });
