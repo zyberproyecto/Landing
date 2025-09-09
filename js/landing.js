@@ -1,17 +1,12 @@
 /* ========================================================================
    Landing – lógica de Login + Registro
-   Requisitos:
-   - API Usuarios     => http://127.0.0.1:8001  (POST /api/v1/login, GET /api/v1/perfil)
-   - API Cooperativa  => http://127.0.0.1:8002  (POST /api/solicitudes)
-   - Backoffice       => http://127.0.0.1:8003  (/sso?token=...)
-   - Front Socios     => página estática o app separada
    ======================================================================== */
 
 /* ========= Endpoints ========= */
-const API_USUARIOS_BASE   = "http://127.0.0.1:8001";
-const API_COOP_BASE       = "http://127.0.0.1:8002";
-const BACKOFFICE_URL      = "http://127.0.0.1:8003";
-const FRONT_SOCIOS_URL    = "http://127.0.0.1:5500/frontend_usuarios/index.html";
+const API_USUARIOS_BASE = "http://127.0.0.1:8001"; // Laravel api-usuarios
+const API_COOP_BASE     = "http://127.0.0.1:8002"; // Laravel api-cooperativa
+const BACKOFFICE_URL    = "http://127.0.0.1:8003"; // app-backoffice (tiene /sso)
+const FRONT_SOCIOS_URL  = "http://127.0.0.1:5500/frontend_usuarios/index.html";
 
 /* ========= Helpers ========= */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -71,55 +66,80 @@ function extractToken(possible) {
 document.addEventListener("DOMContentLoaded", () => {
 
   /* ================== LOGIN (landing/login.html) ================== */
-  const loginForm = $("#login-form") || (function searchLoginFallback(){
-    const f = document.querySelector("form");
-    if (!f) return null;
-    const u = $("#usuario", f), p = $("#password", f);
-    return (u && p) ? f : null;
-  })();
+  const loginForm =
+    $("#login-form") ||
+    (function searchLoginFallback(){
+      const f = document.querySelector("form");
+      if (!f) return null;
+      // Compatibilidad: acepta #ci_usuario o #usuario
+      const u = $("#ci_usuario", f) || $("#usuario", f);
+      const p = $("#password", f);
+      return (u && p) ? f : null;
+    })();
 
   if (loginForm) {
     loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const usuario = ($("#usuario", loginForm)?.value || "").trim();
+
+      // Lee CI desde #ci_usuario (recomendado) o #usuario (compatibilidad)
+      const ci_usuario =
+        ($("#ci_usuario", loginForm)?.value || $("#usuario", loginForm)?.value || "").trim();
       const password = ($("#password", loginForm)?.value || "");
 
-      if (!usuario || !password) {
-        setMsgBelowForm(loginForm, "Completá usuario y contraseña.", "#b00");
+      if (!ci_usuario || !password) {
+        setMsgBelowForm(loginForm, "Completá CI y contraseña.", "#b00");
         return;
       }
 
       try {
         setMsgBelowForm(loginForm, "Procesando login...");
 
-        // 1) Login en API Usuarios
-        const loginResp = await postJSON(`${API_USUARIOS_BASE}/api/v1/login`, {
-          login: usuario,
+        // 1) Login en API Usuarios (RUTAS REALES SIN /v1)
+        //    POST http://127.0.0.1:8001/api/login
+        const loginResp = await postJSON(`${API_USUARIOS_BASE}/api/login`, {
+          ci_usuario,
           password
         });
+
         const token = extractToken(loginResp);
         if (!token) throw new Error("No llegó token desde API Usuarios.");
 
-        localStorage.setItem("token", token);
+        // Guarda token para el front de socios / backoffice
+        try { localStorage.setItem("token", token); } catch {}
 
-        // 2) Perfil del usuario
-        const perfilResp = await getJSON(`${API_USUARIOS_BASE}/api/v1/perfil`, token);
-        const perfil  = perfilResp?.data || perfilResp || {};
-        const rol     = perfil?.rol ?? loginResp?.user?.rol ?? "socio";
-        const estado  = perfil?.estado_registro ?? perfil?.estado ?? "Pendiente";
+        // 2) Perfil del usuario autenticado
+        //    GET http://127.0.0.1:8001/api/me (con Bearer)
+        const perfilResp = await getJSON(`${API_USUARIOS_BASE}/api/me`, token);
+        const perfil = perfilResp?.data || perfilResp || {};
 
-        if (rol === "admin" && estado === "Aprobado") {
+        const rol    = perfil?.rol ?? loginResp?.rol ?? loginResp?.user?.rol ?? "socio";
+        const estado = perfil?.estado_registro ?? perfil?.estado ?? "Pendiente";
+
+        // --- corrección: normalizar comparaciones ---
+        const rolNorm    = (rol + "").trim().toLowerCase();
+        const estadoNorm = (estado + "").trim().toLowerCase();
+        const aprobado = ["aprobado","aprobada","ok","activo","activa","validado","validada"].includes(estadoNorm);
+
+        if (!aprobado) {
+          setMsgBelowForm(loginForm, "Usuario no aprobado aún.", "#b00");
+          return;
+        }
+
+        // 3) Redirecciones por rol, PASANDO TOKEN
+        if (rolNorm === "admin") {
           setMsgBelowForm(loginForm, "Login OK (admin). Redirigiendo al Backoffice...", "green");
+          // Recomendado: /sso?token=<...> para que el backoffice guarde el token
           window.location.assign(`${BACKOFFICE_URL}/sso?token=${encodeURIComponent(token)}`);
-        } else if (rol === "socio" && estado === "Aprobado") {
-          setMsgBelowForm(loginForm, "Login OK (socio). Redirigiendo al portal...", "green");
-          window.location.assign(FRONT_SOCIOS_URL);
         } else {
-          setMsgBelowForm(loginForm, "Usuario no aprobado o sin permisos para ingresar.", "#b00");
+          setMsgBelowForm(loginForm, "Login OK (socio). Redirigiendo al portal...", "green");
+          // Recomendado: pasar token por hash y ya también quedó guardado en localStorage
+          window.location.assign(`${FRONT_SOCIOS_URL}#token=${encodeURIComponent(token)}`);
         }
       } catch (err) {
         console.error("Login error:", err);
         const msg =
+          err?.errors?.ci_usuario?.[0] ||
+          err?.errors?.password?.[0] ||
           err?.errors?.login?.[0] ||
           err?.message ||
           err?.error ||
@@ -177,11 +197,11 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  /* ================== Logout opcional (si lo usás) ================== */
+  /* ================== Logout opcional ================== */
   document.addEventListener("click", (e) => {
     if (e.target && (e.target.matches('[data-logout="1"]') || e.target.id === "logout")) {
       e.preventDefault();
-      localStorage.removeItem("token");
+      try { localStorage.removeItem("token"); } catch {}
       window.location.reload();
     }
   });
