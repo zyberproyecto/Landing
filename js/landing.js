@@ -1,7 +1,7 @@
 /* ========================================================================
    Landing – lógica de Login + Registro
    Requisitos:
-   - API Usuarios     => http://127.0.0.1:8001  (POST /api/login, GET /api/perfil)
+   - API Usuarios     => http://127.0.0.1:8001  (POST /api/v1/login, GET /api/v1/perfil)
    - API Cooperativa  => http://127.0.0.1:8002  (POST /api/solicitudes)
    - Backoffice       => http://127.0.0.1:8003  (/sso?token=...)
    - Front Socios     => página estática o app separada
@@ -93,7 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
         setMsgBelowForm(loginForm, "Procesando login...");
 
         // 1) Login en API Usuarios
-        const loginResp = await postJSON(`${API_USUARIOS_BASE}/api/login`, {
+        const loginResp = await postJSON(`${API_USUARIOS_BASE}/api/v1/login`, {
           login: usuario,
           password
         });
@@ -103,7 +103,7 @@ document.addEventListener("DOMContentLoaded", () => {
         localStorage.setItem("token", token);
 
         // 2) Perfil del usuario
-        const perfilResp = await getJSON(`${API_USUARIOS_BASE}/api/perfil`, token);
+        const perfilResp = await getJSON(`${API_USUARIOS_BASE}/api/v1/perfil`, token);
         const perfil  = perfilResp?.data || perfilResp || {};
         const rol     = perfil?.rol ?? loginResp?.user?.rol ?? "socio";
         const estado  = perfil?.estado_registro ?? perfil?.estado ?? "Pendiente";
